@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UNO Online</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a1a2e; color: #eee; font-family: 'Segoe UI', sans-serif; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  h1 { font-size: 3rem; color: #ff4444; text-shadow: 0 0 20px #ff4444; margin-bottom: 1rem; letter-spacing: 4px; }
+  .screen { display: none; width: 100%; max-width: 900px; padding: 1rem; }
+  .screen.active { display: flex; flex-direction: column; align-items: center; gap: 1rem; }
+  input { padding: 0.7rem 1rem; border-radius: 8px; border: 2px solid #444; background: #16213e; color: #eee; font-size: 1rem; width: 250px; text-align: center; }
+  input:focus { outline: none; border-color: #ff4444; }
+  button { padding: 0.7rem 1.5rem; border-radius: 8px; border: none; font-size: 1rem; cursor: pointer; transition: all 0.2s; font-weight: bold; }
+  .btn-primary { background: #ff4444; color: white; }
+  .btn-primary:hover { background: #cc2222; transform: scale(1.05); }
+  .btn-secondary { background: #444; color: #eee; }
+  .btn-secondary:hover { background: #555; }
+  .btn-green { background: #22aa44; color: white; }
+  .btn-green:hover { background: #118833; transform: scale(1.05); }
+  .btn-leave { background: #7a1a1a; color: #ffaaaa; font-size: 0.85rem; padding: 0.4rem 1rem; }
+  .btn-leave:hover { background: #aa2222; color: white; }
+  .btn-pass { background: #555; color: #ffdd88; border: 2px solid #ffdd88; animation: pulse 1s infinite; }
+  .btn-pass:hover { background: #666; }
+  @keyframes pulse { 0%,100%{box-shadow:0 0 0 0 rgba(255,221,136,0.4)} 50%{box-shadow:0 0 0 8px rgba(255,221,136,0)} }
+  .room-code { font-size: 2.5rem; font-weight: bold; color: #ffdd44; letter-spacing: 8px; background: #16213e; padding: 0.5rem 2rem; border-radius: 12px; border: 2px solid #ffdd44; }
+  .player-list { list-style: none; width: 300px; }
+  .player-list li { padding: 0.5rem 1rem; background: #16213e; margin: 4px 0; border-radius: 8px; border-left: 4px solid #ff4444; }
+  /* Game area */
+  #game-screen { flex-direction: column; }
+  .game-topbar { display: flex; justify-content: flex-end; width: 100%; padding: 0 0.5rem; }
+  .game-area { width: 100%; display: flex; flex-direction: column; gap: 0.5rem; }
+  .opponents { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; padding: 0.5rem; }
+  .opponent { background: #16213e; padding: 0.4rem 0.8rem; border-radius: 8px; font-size: 0.85rem; border: 2px solid #333; transition: all 0.3s; }
+  .opponent.active { border-color: #ffdd44; box-shadow: 0 0 10px #ffdd44; }
+  .center-area { display: flex; align-items: center; justify-content: center; gap: 2rem; padding: 1rem; }
+  .deck-pile { width: 70px; height: 100px; background: linear-gradient(135deg, #1a1a2e, #16213e); border: 3px solid #555; border-radius: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 2rem; transition: transform 0.2s; }
+  .deck-pile:hover { transform: scale(1.1); }
+  .draw-pending { position: absolute; top: -10px; right: -10px; background: #ff4444; color: white; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 0.85rem; }
+  .deck-wrapper { position: relative; }
+  .card { width: 70px; height: 100px; border-radius: 10px; border: 3px solid rgba(255,255,255,0.3); display: flex; flex-direction: column; align-items: center; justify-content: center; font-weight: bold; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; flex-shrink: 0; position: relative; user-select: none; }
+  .card:hover { transform: translateY(-12px); box-shadow: 0 8px 20px rgba(0,0,0,0.5); }
+  .card.red { background: linear-gradient(135deg, #cc2222, #ff5555); color: white; }
+  .card.green { background: linear-gradient(135deg, #118833, #33cc55); color: white; }
+  .card.blue { background: linear-gradient(135deg, #1144aa, #4488ff); color: white; }
+  .card.yellow { background: linear-gradient(135deg, #aa8800, #ffcc00); color: #333; }
+  .card.wild { background: linear-gradient(135deg, #222, #555); color: white; }
+  .card.disabled { opacity: 0.4; cursor: not-allowed; transform: none !important; box-shadow: none !important; }
+  .card.playable { box-shadow: 0 0 12px rgba(255,255,255,0.6); }
+  .card.just-drawn { box-shadow: 0 0 18px 4px #ffdd44 !important; transform: translateY(-16px) !important; }
+  .card-value { font-size: 1.6rem; line-height: 1; }
+  .card-symbol { font-size: 0.65rem; position: absolute; top: 4px; left: 6px; }
+  .card-symbol-br { font-size: 0.65rem; position: absolute; bottom: 4px; right: 6px; transform: rotate(180deg); }
+  .hand-area { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; padding: 0.5rem; min-height: 130px; background: rgba(0,0,0,0.2); border-radius: 12px; }
+  .action-bar { display: flex; align-items: center; justify-content: center; gap: 0.7rem; min-height: 44px; }
+  .info-bar { display: flex; align-items: center; gap: 1rem; padding: 0.5rem 1rem; background: #16213e; border-radius: 8px; flex-wrap: wrap; justify-content: center; font-size: 0.9rem; }
+  .color-badge { display: inline-block; width: 20px; height: 20px; border-radius: 50%; vertical-align: middle; margin-left: 4px; border: 2px solid white; }
+  .toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: #333; color: white; padding: 0.7rem 1.5rem; border-radius: 8px; font-size: 0.95rem; z-index: 1000; opacity: 0; transition: opacity 0.3s; pointer-events: none; white-space: nowrap; }
+  .toast.show { opacity: 1; }
+  .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 500; align-items: center; justify-content: center; }
+  .modal.show { display: flex; }
+  .modal-box { background: #16213e; padding: 2rem; border-radius: 16px; text-align: center; }
+  .modal-box h3 { margin-bottom: 1rem; color: #ffdd44; }
+  .color-buttons { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+  .color-btn { width: 60px; height: 60px; border-radius: 50%; border: 4px solid transparent; cursor: pointer; transition: transform 0.2s, border-color 0.2s; }
+  .color-btn:hover { transform: scale(1.2); border-color: white; }
+  .color-btn.red { background: #ff4444; }
+  .color-btn.green { background: #22cc44; }
+  .color-btn.blue { background: #4488ff; }
+  .color-btn.yellow { background: #ffcc00; }
+  .win-banner { font-size: 2rem; color: #ffdd44; text-align: center; text-shadow: 0 0 20px #ffdd44; padding: 2rem; }
+</style>
+</head>
+<body>
+
+<!-- Lobby -->
+<div id="lobby-screen" class="screen active">
+  <h1>UNO</h1>
+  <input id="player-name" type="text" placeholder="ชื่อของคุณ" maxlength="16">
+  <div style="display:flex;gap:1rem;flex-wrap:wrap;justify-content:center;">
+    <button class="btn-primary" onclick="createRoom()">สร้างห้อง</button>
+    <button class="btn-secondary" onclick="showJoin()">เข้าร่วมห้อง</button>
+  </div>
+  <div id="join-area" style="display:none;flex-direction:column;align-items:center;gap:0.7rem;">
+    <input id="room-code-input" type="text" placeholder="รหัสห้อง 4 ตัว" maxlength="4" style="text-transform:uppercase;letter-spacing:4px;">
+    <button class="btn-green" onclick="joinRoom()">เข้าร่วม</button>
+  </div>
+</div>
+
+<!-- Waiting room -->
+<div id="waiting-screen" class="screen">
+  <h1>UNO</h1>
+  <div>รหัสห้อง:</div>
+  <div class="room-code" id="display-code"></div>
+  <div style="font-size:0.85rem;color:#aaa;">บอกรหัสนี้ให้เพื่อน</div>
+  <ul class="player-list" id="player-list-ui"></ul>
+  <button id="start-btn" class="btn-green" onclick="startGame()" style="display:none;">เริ่มเกม</button>
+  <div id="waiting-msg" style="color:#aaa;font-size:0.9rem;">รอเจ้าของห้องเริ่มเกม...</div>
+  <button class="btn-leave" onclick="leaveRoom()">← ออกจากห้อง</button>
+</div>
+
+<!-- Game -->
+<div id="game-screen" class="screen">
+  <div class="game-topbar">
+    <button class="btn-leave" onclick="leaveRoom()">← ออกจากห้อง</button>
+  </div>
+  <div class="game-area">
+    <div class="opponents" id="opponents-area"></div>
+    <div class="center-area">
+      <div class="deck-wrapper">
+        <div class="deck-pile" id="deck-btn" onclick="drawCard()" title="จั่วไพ่">🃏</div>
+        <div id="draw-badge" class="draw-pending" style="display:none;"></div>
+      </div>
+      <div id="top-card-display" class="card" style="cursor:default;"></div>
+    </div>
+    <div class="info-bar" id="info-bar"></div>
+    <div class="action-bar" id="action-bar"></div>
+    <div class="hand-area" id="hand-area"></div>
+  </div>
+</div>
+
+<!-- Color picker modal -->
+<div class="modal" id="color-modal">
+  <div class="modal-box">
+    <h3>เลือกสี</h3>
+    <div class="color-buttons">
+      <div class="color-btn red" onclick="pickColor('red')"></div>
+      <div class="color-btn green" onclick="pickColor('green')"></div>
+      <div class="color-btn blue" onclick="pickColor('blue')"></div>
+      <div class="color-btn yellow" onclick="pickColor('yellow')"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket = io();
+let myName = '';
+let myRoomCode = '';
+let isOwner = false;
+let pendingCardIndex = null;
+let lastState = null;
+
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+function toast(msg, dur = 2500) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), dur);
+}
+
+function showJoin() {
+  const a = document.getElementById('join-area');
+  a.style.display = a.style.display === 'none' ? 'flex' : 'none';
+}
+
+function createRoom() {
+  myName = document.getElementById('player-name').value.trim();
+  if (!myName) return toast('ใส่ชื่อก่อนนะ');
+  isOwner = true;
+  socket.emit('createRoom', { name: myName });
+}
+
+function joinRoom() {
+  myName = document.getElementById('player-name').value.trim();
+  const code = document.getElementById('room-code-input').value.trim().toUpperCase();
+  if (!myName) return toast('ใส่ชื่อก่อนนะ');
+  if (code.length !== 4) return toast('รหัสต้อง 4 ตัว');
+  socket.emit('joinRoom', { code, name: myName });
+}
+
+// ข้อ 1: ออกจากห้อง
+function leaveRoom() {
+  if (!myRoomCode) { goLobby(); return; }
+  socket.emit('leaveRoom', { code: myRoomCode });
+}
+
+function goLobby() {
+  myRoomCode = '';
+  isOwner = false;
+  lastState = null;
+  pendingCardIndex = null;
+  document.getElementById('join-area').style.display = 'none';
+  document.getElementById('room-code-input').value = '';
+  showScreen('lobby-screen');
+}
+
+function startGame() {
+  socket.emit('startGame', { code: myRoomCode });
+}
+
+function drawCard() {
+  if (lastState && lastState.awaitingDrawPlay) return toast('กรุณาเลือกเล่นหรือกด "ข้ามตา"');
+  socket.emit('drawCard', { code: myRoomCode });
+}
+
+// ข้อ 2: ข้ามตาหลังจั่ว
+function passTurn() {
+  socket.emit('passTurn', { code: myRoomCode });
+}
+
+function cardLabel(card) {
+  const map = { skip: 'X', reverse: '↺', draw2: '+2', wild: 'W', wild4: '+4' };
+  return map[card.value] || card.value;
+}
+
+function cardIcon(card) {
+  if (card.value === 'wild') return '🌈';
+  if (card.value === 'wild4') return '+4';
+  if (card.value === 'skip') return '🚫';
+  if (card.value === 'reverse') return '↺';
+  if (card.value === 'draw2') return '+2';
+  return card.value;
+}
+
+function renderCard(card, index, isPlayable, isMyTurn, isJustDrawn) {
+  const div = document.createElement('div');
+  div.className = 'card ' + card.color;
+  const label = cardLabel(card);
+  div.innerHTML = `<span class="card-symbol">${label}</span><span class="card-value">${cardIcon(card)}</span><span class="card-symbol-br">${label}</span>`;
+
+  if (isJustDrawn) {
+    div.classList.add('just-drawn');
+    if (isPlayable) div.onclick = () => onPlayCard(index, card);
+    // ไพ่ที่จั่วมาแต่เล่นไม่ได้ก็ยังไม่ disabled เพราะไฮไลต์ไว้แล้ว
+  } else if (!isMyTurn || !isPlayable) {
+    div.classList.add('disabled');
+  } else {
+    div.classList.add('playable');
+    div.onclick = () => onPlayCard(index, card);
+  }
+  return div;
+}
+
+function onPlayCard(index, card) {
+  if (!lastState) return;
+  if (card.color === 'wild') {
+    pendingCardIndex = index;
+    document.getElementById('color-modal').classList.add('show');
+  } else {
+    socket.emit('playCard', { code: myRoomCode, cardIndex: index, chosenColor: null });
+  }
+}
+
+function pickColor(color) {
+  document.getElementById('color-modal').classList.remove('show');
+  if (pendingCardIndex !== null) {
+    socket.emit('playCard', { code: myRoomCode, cardIndex: pendingCardIndex, chosenColor: color });
+    pendingCardIndex = null;
+  }
+}
+
+function renderGame(state) {
+  lastState = state;
+  const isMyTurn = state.myIndex === state.currentPlayer;
+  const topCard = state.topCard;
+
+  // Top card
+  const topEl = document.getElementById('top-card-display');
+  topEl.className = 'card ' + (state.currentColor || topCard.color);
+  topEl.style.cursor = 'default';
+  const lbl = cardLabel(topCard);
+  topEl.innerHTML = `<span class="card-symbol">${lbl}</span><span class="card-value">${cardIcon(topCard)}</span><span class="card-symbol-br">${lbl}</span>`;
+
+  // Draw badge
+  const badge = document.getElementById('draw-badge');
+  if (state.drawPending > 0) { badge.style.display = 'flex'; badge.textContent = '+' + state.drawPending; }
+  else badge.style.display = 'none';
+
+  // Info bar
+  const dir = state.direction === 1 ? '→' : '←';
+  const colorNames = { red: 'แดง', green: 'เขียว', blue: 'น้ำเงิน', yellow: 'เหลือง' };
+  const colorName = colorNames[state.currentColor] || state.currentColor;
+  const colorMap = { red:'#ff4444', green:'#22cc44', blue:'#4488ff', yellow:'#ffcc00' };
+  let infoHTML = `
+    <span>สี: <span class="color-badge" style="background:${colorMap[state.currentColor] || '#888'}"></span> ${colorName}</span>
+    <span>ทิศ: ${dir}</span>
+    <span>${isMyTurn ? '✅ ตาคุณ!' : '⏳ รอตาคุณ'}</span>
+  `;
+  if (state.drawPending > 0) {
+    const stackType = topCard.value === 'draw2' ? '+2' : '+4';
+    infoHTML += `<span style="color:#ff4444">⚠️ ต้องจั่ว ${state.drawPending} ใบ / ต่อด้วย ${stackType} / หรือ reverse สีเดียวกันตีกลับ</span>`;
+  }
+  document.getElementById('info-bar').innerHTML = infoHTML;
+
+  // Deck button
+  const deckBtn = document.getElementById('deck-btn');
+  deckBtn.style.opacity = isMyTurn ? '1' : '0.5';
+  deckBtn.style.cursor = isMyTurn ? 'pointer' : 'not-allowed';
+  deckBtn.style.pointerEvents = state.gameOver ? 'none' : '';
+
+  // Action bar — ปุ่มข้ามตา (ข้อ 2)
+  const actionBar = document.getElementById('action-bar');
+  actionBar.innerHTML = '';
+  if (isMyTurn && state.awaitingDrawPlay) {
+    const btn = document.createElement('button');
+    btn.className = 'btn-pass';
+    btn.textContent = '⏭ ข้ามตา (ไม่เล่นไพ่ที่จั่ว)';
+    btn.onclick = passTurn;
+    actionBar.appendChild(btn);
+  }
+
+  // Opponents
+  const opp = document.getElementById('opponents-area');
+  opp.innerHTML = '';
+  state.players.forEach((p, i) => {
+    if (i === state.myIndex) return;
+    const div = document.createElement('div');
+    div.className = 'opponent' + (i === state.currentPlayer ? ' active' : '');
+    div.textContent = `${p.name} (${p.cardCount} ใบ)${i === state.currentPlayer ? ' 🎯' : ''}`;
+    opp.appendChild(div);
+  });
+
+  // Hand
+  const hand = document.getElementById('hand-area');
+  hand.innerHTML = '';
+
+  if (state.gameOver) {
+    const iWon = state.winner === myName;
+    hand.innerHTML = `<div class="win-banner">${iWon ? '🎉 คุณชนะ! 🎉' : `🏆 ${state.winner} ชนะ!`}</div>`;
+    return;
+  }
+
+  state.hand.forEach((card, i) => {
+    const isJustDrawn = state.awaitingDrawPlay && i === state.drawnCardIdx;
+    let playable;
+
+    if (isJustDrawn) {
+      // ข้อ 2: highlight ไพ่ที่จั่วมาแยกต่างหาก
+      playable = true; // จั่วมาแล้ว เล่นได้แน่นอน (server ตรวจแล้ว)
+    } else if (state.awaitingDrawPlay) {
+      // อยู่ใน awaitingDrawPlay — เล่นได้เฉพาะไพ่ที่จั่ว
+      playable = false;
+    } else if (state.drawPending > 0) {
+      // ข้อ 3: stack rule ตาม topCard + reverse สีเดียวกันตีกลับได้
+      const stackType = topCard.value === 'draw2' ? 'draw2' : 'wild4';
+      playable = card.value === stackType ||
+                 (card.value === 'reverse' && card.color === state.currentColor);
+    } else {
+      playable = card.color === 'wild' || card.color === state.currentColor || card.value === topCard.value;
+    }
+
+    hand.appendChild(renderCard(card, i, playable, isMyTurn, isJustDrawn));
+  });
+}
+
+// Socket events
+socket.on('roomCreated', ({ code }) => {
+  myRoomCode = code;
+  document.getElementById('display-code').textContent = code;
+  document.getElementById('start-btn').style.display = 'block';
+  document.getElementById('waiting-msg').style.display = 'none';
+  document.getElementById('player-list-ui').innerHTML = `<li>${myName} (คุณ)</li>`;
+  showScreen('waiting-screen');
+});
+
+socket.on('roomJoined', ({ code }) => {
+  myRoomCode = code;
+  document.getElementById('display-code').textContent = code;
+  document.getElementById('start-btn').style.display = 'none';
+  document.getElementById('waiting-msg').style.display = 'block';
+  showScreen('waiting-screen');
+});
+
+socket.on('playerList', (names) => {
+  const ul = document.getElementById('player-list-ui');
+  ul.innerHTML = names.map(n => `<li>${n}${n === myName ? ' (คุณ)' : ''}</li>`).join('');
+});
+
+socket.on('gameState', (state) => {
+  if (!document.getElementById('game-screen').classList.contains('active')) {
+    showScreen('game-screen');
+  }
+  renderGame(state);
+});
+
+// ข้อ 1: server ยืนยันว่าออกแล้ว
+socket.on('leftRoom', () => { goLobby(); });
+
+socket.on('playerLeft', (name) => toast(`${name} ออกจากเกมแล้ว`, 3000));
+socket.on('error', (msg) => toast('❌ ' + msg, 3000));
+
+document.getElementById('room-code-input').addEventListener('input', function() {
+  this.value = this.value.toUpperCase();
+});
+document.getElementById('player-name').addEventListener('keydown', e => {
+  if (e.key === 'Enter') createRoom();
+});
+document.getElementById('room-code-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') joinRoom();
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>UNO LAN</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bungee&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+<script src="/socket.io/socket.io.js"></script>
+<style>
+  :root{
+    --red:#e1342f; --yellow:#f5c518; --green:#2bae4a; --blue:#1c7ed6; --wild:#1a1a1a;
+    --bg1:#1b1230; --bg2:#0d0820; --panel:rgba(255,255,255,.06); --line:rgba(255,255,255,.14);
+    --ink:#f3eefb; --muted:#a79bc4;
+  }
+  *{box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent;}
+  body{
+    font-family:'Outfit',sans-serif; color:var(--ink); min-height:100vh;
+    background:
+      radial-gradient(circle at 20% -10%, #3a1d6e 0%, transparent 45%),
+      radial-gradient(circle at 90% 110%, #6e1d3a 0%, transparent 45%),
+      linear-gradient(160deg, var(--bg1), var(--bg2));
+    background-attachment:fixed;
+    padding:16px; overflow-x:hidden;
+  }
+  h1{font-family:'Bungee',sans-serif; letter-spacing:1px;}
+  .center{max-width:560px; margin:0 auto;}
+  .hidden{display:none !important;}
+
+  /* ---------- Lobby ---------- */
+  .logo{font-family:'Bungee',sans-serif; font-size:62px; text-align:center; margin:30px 0 4px;
+    background:linear-gradient(90deg,var(--red),var(--yellow),var(--green),var(--blue));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    text-shadow:0 6px 30px rgba(0,0,0,.4); transform:rotate(-3deg);}
+  .tag{text-align:center; color:var(--muted); margin-bottom:30px; font-weight:600;}
+  .card-panel{background:var(--panel); border:1px solid var(--line); border-radius:22px;
+    padding:24px; backdrop-filter:blur(8px); box-shadow:0 20px 60px rgba(0,0,0,.4); margin-bottom:18px;}
+  label{display:block; font-size:13px; color:var(--muted); margin:0 0 6px; font-weight:600;}
+  input{width:100%; padding:14px 16px; border-radius:14px; border:1px solid var(--line);
+    background:rgba(0,0,0,.25); color:var(--ink); font-size:17px; font-family:inherit; margin-bottom:16px;}
+  input:focus{outline:none; border-color:var(--yellow);}
+  .code-input{text-transform:uppercase; letter-spacing:6px; font-weight:800; text-align:center; font-size:22px;}
+  button{font-family:inherit; font-weight:800; cursor:pointer; border:none; border-radius:14px;
+    padding:15px; font-size:17px; width:100%; transition:transform .08s, filter .15s;}
+  button:active{transform:scale(.97);}
+  .btn-primary{background:linear-gradient(135deg,var(--red),#ff7a45); color:#fff; box-shadow:0 8px 24px rgba(225,52,47,.4);}
+  .btn-green{background:linear-gradient(135deg,var(--green),#5fd97e); color:#06310f;}
+  .btn-ghost{background:transparent; border:1px solid var(--line); color:var(--ink);}
+  .divider{display:flex; align-items:center; gap:12px; color:var(--muted); margin:20px 0; font-size:13px;}
+  .divider::before,.divider::after{content:''; flex:1; height:1px; background:var(--line);}
+
+  /* ---------- Waiting room ---------- */
+  .room-code{font-family:'Bungee',sans-serif; font-size:44px; text-align:center; letter-spacing:6px; color:var(--yellow);}
+  .pill{display:inline-flex; align-items:center; gap:8px; background:rgba(0,0,0,.25);
+    border:1px solid var(--line); border-radius:999px; padding:10px 16px; font-weight:600; margin:4px;}
+  .players-list{display:flex; flex-direction:column; gap:10px; margin:18px 0;}
+  .player-row{display:flex; align-items:center; gap:12px; background:rgba(0,0,0,.2);
+    border:1px solid var(--line); border-radius:14px; padding:12px 16px;}
+  .avatar{width:36px; height:36px; border-radius:50%; display:grid; place-items:center;
+    font-weight:800; background:linear-gradient(135deg,var(--blue),var(--green)); color:#fff;}
+  .hostbadge{margin-left:auto; font-size:11px; background:var(--yellow); color:#000; padding:3px 9px; border-radius:999px; font-weight:800;}
+  .ip-hint{font-size:12px; color:var(--muted); text-align:center; line-height:1.6; margin-top:8px;}
+
+  /* ---------- Game ---------- */
+  .topbar{display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:center; margin-bottom:14px;}
+  .status{text-align:center; min-height:26px; font-weight:600; color:var(--yellow); margin-bottom:10px;}
+  .opponents{display:flex; gap:8px; flex-wrap:wrap; justify-content:center; margin-bottom:18px;}
+  .opp{background:rgba(0,0,0,.22); border:1px solid var(--line); border-radius:14px; padding:10px 12px; text-align:center; min-width:78px; position:relative;}
+  .opp.turn{border-color:var(--yellow); box-shadow:0 0 0 2px var(--yellow), 0 0 22px rgba(245,197,24,.4);}
+  .opp .nm{font-weight:700; font-size:14px; max-width:90px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .opp .ct{font-size:12px; color:var(--muted);}
+  .opp .cardback{display:inline-block; width:18px; height:26px; border-radius:4px;
+    background:repeating-linear-gradient(45deg,#e1342f,#e1342f 4px,#b81f1b 4px,#b81f1b 8px); margin-top:4px;}
+  .uno-flag{position:absolute; top:-8px; right:-6px; background:var(--red); color:#fff;
+    font-family:'Bungee'; font-size:10px; padding:2px 6px; border-radius:6px; transform:rotate(8deg);}
+  .offline{opacity:.4;}
+
+  .table{display:flex; align-items:center; justify-content:center; gap:22px; margin:10px 0 22px;}
+  .deck-pile, .discard-pile{display:flex; flex-direction:column; align-items:center; gap:6px;}
+  .pile-label{font-size:11px; color:var(--muted); font-weight:600;}
+  .uno-card{width:74px; height:108px; border-radius:12px; display:grid; place-items:center;
+    font-family:'Bungee',sans-serif; font-size:26px; color:#fff; position:relative;
+    box-shadow:0 8px 20px rgba(0,0,0,.45); user-select:none;}
+  .uno-card .corner{position:absolute; font-size:13px; opacity:.95;}
+  .uno-card .corner.tl{top:6px; left:8px;} .uno-card .corner.br{bottom:6px; right:8px; transform:rotate(180deg);}
+  .uno-card .pip{width:46px; height:62px; background:rgba(255,255,255,.92); border-radius:50%/40%;
+    display:grid; place-items:center; transform:rotate(40deg);}
+  .uno-card .pip span{transform:rotate(-40deg); color:inherit;}
+  .c-red{background:linear-gradient(150deg,#f04b46,var(--red));} .c-red .pip span{color:var(--red);}
+  .c-yellow{background:linear-gradient(150deg,#ffd84d,var(--yellow)); color:#5a4500;} .c-yellow .pip span{color:#b58900;}
+  .c-green{background:linear-gradient(150deg,#46c965,var(--green));} .c-green .pip span{color:var(--green);}
+  .c-blue{background:linear-gradient(150deg,#3a96e6,var(--blue));} .c-blue .pip span{color:var(--blue);}
+  .c-wild{background:conic-gradient(var(--red) 0 25%, var(--yellow) 0 50%, var(--green) 0 75%, var(--blue) 0);}
+  .c-wild .pip span{color:#222; font-size:18px;}
+  .cardback-big{width:74px; height:108px; border-radius:12px;
+    background:repeating-linear-gradient(45deg,#e1342f,#e1342f 7px,#b81f1b 7px,#b81f1b 14px);
+    box-shadow:0 8px 20px rgba(0,0,0,.45); display:grid; place-items:center; cursor:pointer;}
+  .cardback-big::after{content:'UNO'; font-family:'Bungee'; color:#fff; transform:rotate(-20deg); font-size:18px; text-shadow:0 2px 4px rgba(0,0,0,.5);}
+  .color-dot{width:14px; height:14px; border-radius:50%; display:inline-block; vertical-align:middle;}
+
+  .hand-wrap{margin-top:6px;}
+  .hand-title{display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;}
+  .hand{display:flex; gap:8px; overflow-x:auto; padding:10px 4px 18px; scroll-snap-type:x proximity;}
+  .hand .uno-card{flex:0 0 auto; cursor:pointer; scroll-snap-align:center; transition:transform .12s;}
+  .hand .uno-card.playable{box-shadow:0 0 0 3px var(--yellow), 0 8px 20px rgba(0,0,0,.45);}
+  .hand .uno-card.playable:active{transform:translateY(-10px) scale(1.04);}
+  .hand .uno-card:not(.playable){filter:brightness(.62) saturate(.7);}
+  .actions{display:flex; gap:10px; margin-top:4px;}
+  .actions button{flex:1;}
+
+  /* color picker / winner overlay */
+  .overlay{position:fixed; inset:0; background:rgba(5,2,15,.82); display:grid; place-items:center; z-index:50; padding:20px;}
+  .picker{background:#1c1430; border:1px solid var(--line); border-radius:22px; padding:26px; text-align:center; max-width:340px; width:100%;}
+  .picker h3{margin-bottom:18px; font-family:'Bungee'; font-size:18px;}
+  .swatches{display:grid; grid-template-columns:1fr 1fr; gap:14px;}
+  .swatch{height:84px; border-radius:16px; cursor:pointer; border:3px solid transparent; transition:transform .1s;}
+  .swatch:active{transform:scale(.94);}
+  .win-emoji{font-size:64px;}
+  .toast{position:fixed; left:50%; bottom:24px; transform:translateX(-50%); background:#2a1840;
+    border:1px solid var(--line); padding:12px 20px; border-radius:14px; font-weight:700; z-index:99;
+    box-shadow:0 10px 30px rgba(0,0,0,.5); animation:pop .25s;}
+  @keyframes pop{from{opacity:0; transform:translate(-50%,12px);} to{opacity:1; transform:translate(-50%,0);}}
+  .small{font-size:12px; color:var(--muted);}
+</style>
+</head>
+<body>
+
+<!-- ============ LOBBY ============ -->
+<div id="lobby" class="center">
+  <div class="logo">UNO</div>
+  <div class="tag">เล่นกับเพื่อนในวง Wi-Fi เดียวกัน · 2–10 คน</div>
+
+  <div class="card-panel">
+    <label>ชื่อของคุณ</label>
+    <input id="nameInput" maxlength="14" placeholder="เช่น แมว, บอส, ปลา" />
+
+    <button class="btn-primary" onclick="createRoom()">สร้างห้องใหม่</button>
+
+    <div class="divider">หรือ</div>
+
+    <label>รหัสห้อง</label>
+    <input id="codeInput" class="code-input" maxlength="4" placeholder="ABCD" />
+    <button class="btn-green" onclick="joinRoom()">เข้าร่วมห้อง</button>
+  </div>
+  <div class="ip-hint">เพื่อนต้องอยู่ใน Wi-Fi เดียวกัน แล้วเปิด URL ที่ขึ้นในหน้าจอ console ของเครื่องที่รัน server</div>
+</div>
+
+<!-- ============ WAITING ROOM ============ -->
+<div id="waiting" class="center hidden">
+  <div class="tag" style="margin-top:20px">รหัสห้อง — บอกเพื่อนให้พิมพ์รหัสนี้</div>
+  <div class="room-code" id="roomCode">----</div>
+  <div style="text-align:center; margin:14px 0;">
+    <span class="pill">👥 <span id="playerCount">0</span> / 10 คน</span>
+  </div>
+
+  <div class="card-panel">
+    <div class="players-list" id="waitingList"></div>
+    <button id="startBtn" class="btn-primary hidden" onclick="startGame()">เริ่มเกม 🚀</button>
+    <div id="waitHint" class="small" style="text-align:center; margin-top:8px;"></div>
+  </div>
+</div>
+
+<!-- ============ GAME ============ -->
+<div id="game" class="center hidden">
+  <div class="topbar">
+    <span class="pill">ห้อง <b id="gCode"></b></span>
+    <span class="pill" id="dirPill">↻ ตามเข็ม</span>
+    <span class="pill">สำรับ <b id="deckCount">0</b></span>
+  </div>
+
+  <div class="status" id="status"></div>
+  <div class="opponents" id="opponents"></div>
+
+  <div class="table">
+    <div class="deck-pile">
+      <div class="cardback-big" id="deckPile" onclick="drawCard()"></div>
+      <div class="pile-label">กดเพื่อจั่ว</div>
+    </div>
+    <div class="discard-pile">
+      <div id="discardPile"></div>
+      <div class="pile-label">สีปัจจุบัน: <span id="curColorDot" class="color-dot"></span></div>
+    </div>
+  </div>
+
+  <div class="hand-wrap">
+    <div class="hand-title">
+      <span style="font-weight:800">ไพ่ในมือคุณ (<span id="myCount">0</span>)</span>
+      <span id="turnTag" class="small"></span>
+    </div>
+    <div class="hand" id="hand"></div>
+    <div class="actions">
+      <button class="btn-ghost" id="passBtn" onclick="passTurn()">ผ่าน</button>
+      <button class="btn-green hidden" id="restartBtn" onclick="restartGame()">เล่นใหม่ 🔄</button>
+    </div>
+  </div>
+</div>
+
+<!-- color picker overlay -->
+<div id="colorPicker" class="overlay hidden">
+  <div class="picker">
+    <h3>เลือกสีต่อไป</h3>
+    <div class="swatches">
+      <div class="swatch" style="background:var(--red)"    onclick="pickColor('red')"></div>
+      <div class="swatch" style="background:var(--yellow)" onclick="pickColor('yellow')"></div>
+      <div class="swatch" style="background:var(--green)"  onclick="pickColor('green')"></div>
+      <div class="swatch" style="background:var(--blue)"   onclick="pickColor('blue')"></div>
+    </div>
+  </div>
+</div>
+
+<!-- winner overlay -->
+<div id="winOverlay" class="overlay hidden">
+  <div class="picker">
+    <div class="win-emoji">🎉</div>
+    <h3 id="winName"></h3>
+    <button class="btn-primary" id="winRestart" onclick="restartGame()" style="margin-top:16px">เล่นใหม่</button>
+    <div id="winHint" class="small" style="margin-top:10px"></div>
+  </div>
+</div>
+
+<script>
+const socket = io();
+let me = { id:null, isHost:false };
+let pendingPlayIndex = null;   // เก็บ index ไพ่ wild ที่รอเลือกสี
+let state = null;
+
+const $ = id => document.getElementById(id);
+const COLOR_TH = { red:'แดง', yellow:'เหลือง', green:'เขียว', blue:'น้ำเงิน' };
+const VAL_SYMBOL = { skip:'⊘', reverse:'⇄', draw2:'+2', wild:'★', wild4:'+4' };
+
+// ---------- สร้าง element ไพ่ ----------
+function cardEl(card, opts={}) {
+  const el = document.createElement('div');
+  const colorClass = card.color === 'wild' ? 'c-wild' : 'c-' + card.color;
+  el.className = 'uno-card ' + colorClass;
+  let main = VAL_SYMBOL[card.value] !== undefined ? VAL_SYMBOL[card.value] : card.value;
+  el.innerHTML = `
+    <div class="corner tl">${main}</div>
+    <div class="pip"><span>${main}</span></div>
+    <div class="corner br">${main}</div>`;
+  return el;
+}
+
+// ---------- Lobby actions ----------
+function getName(){ return ($('nameInput').value || 'Player').trim() || 'Player'; }
+function createRoom(){ socket.emit('createRoom', { name:getName() }); }
+function joinRoom(){
+  const code = $('codeInput').value.trim().toUpperCase();
+  if(code.length < 4) return toast('ใส่รหัสห้อง 4 ตัว');
+  socket.emit('joinRoom', { name:getName(), code });
+}
+function startGame(){ socket.emit('startGame'); }
+function restartGame(){ socket.emit('restartGame'); }
+function drawCard(){
+  if(!isMyTurn()) return toast('ยังไม่ถึงตาคุณ');
+  socket.emit('drawCard');
+}
+function passTurn(){
+  if(!isMyTurn()) return toast('ยังไม่ถึงตาคุณ');
+  socket.emit('passTurn');
+}
+function isMyTurn(){ return state && state.currentPlayerId === me.id; }
+
+// ---------- เล่นไพ่ ----------
+function tryPlay(index){
+  if(!isMyTurn()) return toast('ยังไม่ถึงตาคุณ');
+  const card = state.yourHand[index];
+  if(!card) return;
+  if(card.color === 'wild'){
+    pendingPlayIndex = index;
+    $('colorPicker').classList.remove('hidden');
+  } else {
+    socket.emit('playCard', { index });
+  }
+}
+function pickColor(color){
+  $('colorPicker').classList.add('hidden');
+  if(pendingPlayIndex !== null){
+    socket.emit('playCard', { index: pendingPlayIndex, chosenColor: color });
+    pendingPlayIndex = null;
+  }
+}
+
+// ---------- Socket handlers ----------
+socket.on('joined', ({ code, youAreHost }) => {
+  me.isHost = youAreHost;
+  $('lobby').classList.add('hidden');
+  $('waiting').classList.remove('hidden');
+  $('roomCode').textContent = code;
+});
+socket.on('errorMsg', msg => toast(msg));
+socket.on('state', s => { state = s; me.id = s.yourId; render(); });
+
+// ---------- Render ----------
+function render(){
+  if(!state) return;
+
+  if(!state.started){
+    // waiting room
+    $('waiting').classList.remove('hidden');
+    $('game').classList.add('hidden');
+    $('winOverlay').classList.add('hidden');
+    $('playerCount').textContent = state.players.length;
+    const list = $('waitingList'); list.innerHTML = '';
+    state.players.forEach(p => {
+      const row = document.createElement('div');
+      row.className = 'player-row';
+      row.innerHTML = `<div class="avatar">${(p.name[0]||'?').toUpperCase()}</div>
+        <div style="font-weight:700">${escapeHtml(p.name)}</div>
+        ${p.isHost ? '<span class="hostbadge">HOST</span>' : ''}`;
+      list.appendChild(row);
+    });
+    const amHost = state.hostId === me.id;
+    me.isHost = amHost;
+    const startBtn = $('startBtn');
+    if(amHost){
+      startBtn.classList.remove('hidden');
+      startBtn.disabled = state.players.length < 2;
+      startBtn.style.opacity = state.players.length < 2 ? .5 : 1;
+      $('waitHint').textContent = state.players.length < 2 ? 'รออย่างน้อย 2 คนเพื่อเริ่ม' : '';
+    } else {
+      startBtn.classList.add('hidden');
+      $('waitHint').textContent = 'รอเจ้าของห้องกดเริ่มเกม...';
+    }
+    return;
+  }
+
+  // game screen
+  $('waiting').classList.add('hidden');
+  $('game').classList.remove('hidden');
+
+  $('gCode').textContent = state.code;
+  $('deckCount').textContent = state.deckCount;
+  $('dirPill').textContent = state.direction === 1 ? '↻ ตามเข็ม' : '↺ ทวนเข็ม';
+  $('status').textContent = state.lastAction || '';
+
+  // opponents (ทุกคนยกเว้นเรา)
+  const opp = $('opponents'); opp.innerHTML = '';
+  state.players.forEach(p => {
+    if(p.id === me.id) return;
+    const d = document.createElement('div');
+    d.className = 'opp' + (p.id === state.currentPlayerId ? ' turn' : '') + (p.connected ? '' : ' offline');
+    d.innerHTML = `<div class="nm">${escapeHtml(p.name)}</div>
+      <div class="ct">${p.handCount} ใบ</div>
+      <div class="cardback"></div>
+      ${p.handCount === 1 ? '<div class="uno-flag">UNO</div>' : ''}`;
+    opp.appendChild(d);
+  });
+
+  // discard top
+  const dp = $('discardPile'); dp.innerHTML = '';
+  if(state.topCard){
+    const tc = {...state.topCard};
+    if(tc.color === 'wild') tc.color = state.currentColor; // แสดงสีที่เลือกแล้ว แต่คงสัญลักษณ์
+    const el = cardEl(state.topCard);
+    // ถ้าเป็น wild ให้พื้นเป็นสีที่เลือก
+    if(state.topCard.color === 'wild'){
+      el.className = 'uno-card c-' + state.currentColor;
+    }
+    dp.appendChild(el);
+  }
+  $('curColorDot').style.background = `var(--${state.currentColor})`;
+
+  // my hand
+  const hand = $('hand'); hand.innerHTML = '';
+  const myHand = state.yourHand || [];
+  $('myCount').textContent = myHand.length;
+  myHand.forEach((card, i) => {
+    const el = cardEl(card);
+    const playable = isMyTurn() && canPlayClient(card);
+    if(playable) el.classList.add('playable');
+    el.onclick = () => tryPlay(i);
+    hand.appendChild(el);
+  });
+
+  $('turnTag').textContent = isMyTurn()
+    ? (state.pendingDraw > 0 ? `ถึงตาคุณ · ต้องลง +/จั่ว ${state.pendingDraw}` : '★ ถึงตาคุณแล้ว')
+    : 'รอตาคุณ...';
+
+  // restart button (host only, anytime)
+  $('restartBtn').classList.toggle('hidden', state.hostId !== me.id);
+
+  // winner
+  if(state.winner){
+    const w = state.players.find(p => p.id === state.winner);
+    $('winName').textContent = (w ? w.name : '?') + ' ชนะ!';
+    $('winOverlay').classList.remove('hidden');
+    $('winRestart').classList.toggle('hidden', state.hostId !== me.id);
+    $('winHint').textContent = state.hostId === me.id ? '' : 'รอเจ้าของห้องเริ่มเกมใหม่';
+  } else {
+    $('winOverlay').classList.add('hidden');
+  }
+}
+
+// ตรรกะฝั่ง client (เพื่อไฮไลต์ไพ่ที่ลงได้ — server ตรวจซ้ำอยู่ดี)
+function canPlayClient(card){
+  if(state.pendingDraw > 0){
+    const top = state.topCard;
+    return (card.value === 'draw2' && top.value === 'draw2') || card.value === 'wild4';
+  }
+  if(card.color === 'wild') return true;
+  if(card.color === state.currentColor) return true;
+  if(state.topCard && card.value === state.topCard.value) return true;
+  return false;
+}
+
+function escapeHtml(s){ return (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+let toastTimer;
+function toast(msg){
+  let t = $('toastBox');
+  if(!t){ t = document.createElement('div'); t.id='toastBox'; t.className='toast'; document.body.appendChild(t); }
+  t.textContent = msg; t.style.display='block';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=> t.style.display='none', 2200);
+}
+
+// auto-uppercase code input
+$('codeInput').addEventListener('input', e => e.target.value = e.target.value.toUpperCase());
+</script>
+</body>
+</html>
