@@ -115,6 +115,7 @@ function broadcastState(roomCode) {
       // ข้อ 2: ไพ่ที่เพิ่งจั่ว รอตัดสินใจ
       awaitingDrawPlay: room.awaitingDrawPlay && room.currentPlayer === idx,
       drawnCardIdx: room.awaitingDrawPlay && room.currentPlayer === idx ? room.drawnCardIdx : -1,
+      awaitingFreePlay: room.awaitingFreePlay && room.currentPlayer === idx,
     });
   });
 }
@@ -144,8 +145,9 @@ function removePlayerFromRoom(socketId) {
       room.currentPlayer = 0;
     }
     // reset awaitingDrawPlay ถ้าคนนั้นออก
-    if (room.awaitingDrawPlay) {
+    if (room.awaitingDrawPlay || room.awaitingFreePlay) {
       room.awaitingDrawPlay = false;
+      room.awaitingFreePlay = false;
       room.drawnCardIdx = -1;
     }
     io.to(code).emit('playerLeft', name);
@@ -163,7 +165,7 @@ io.on('connection', (socket) => {
       deck: [], discard: [], currentPlayer: 0, direction: 1,
       currentColor: null, started: false, drawPending: 0,
       gameOver: false, winner: null,
-      awaitingDrawPlay: false, drawnCardIdx: -1,
+      awaitingDrawPlay: false, drawnCardIdx: -1, awaitingFreePlay: false,
     };
     socket.join(code);
     socket.emit('roomCreated', { code, name });
@@ -211,58 +213,74 @@ io.on('connection', (socket) => {
     broadcastState(code);
   });
 
-  socket.on('playCard', ({ code, cardIndex, chosenColor }) => {
+  socket.on('playCard', ({ code, cardIndex, cardIndices, chosenColor }) => {
     const room = rooms[code];
     if (!room || !room.started || room.gameOver) return;
     const playerIdx = room.players.findIndex(p => p.id === socket.id);
     if (playerIdx !== room.currentPlayer) return socket.emit('error', 'ยังไม่ถึงตาคุณ');
     const player = room.players[playerIdx];
-    const card = player.hand[cardIndex];
-    if (!card) return socket.emit('error', 'ไพ่ไม่ถูกต้อง');
-    const topCard = room.discard[room.discard.length - 1];
 
-    // ข้อ 2: ถ้าอยู่ใน awaitingDrawPlay เล่นได้เฉพาะไพ่ที่จั่วมา
-    if (room.awaitingDrawPlay) {
-      if (cardIndex !== room.drawnCardIdx) return socket.emit('error', 'เล่นได้เฉพาะไพ่ที่เพิ่งจั่วมา');
-      room.awaitingDrawPlay = false;
-      room.drawnCardIdx = -1;
-    } else if (room.drawPending > 0) {
-      // ข้อ 3: stack rule — +2 ต่อได้เฉพาะ +2, +4 ต่อได้เฉพาะ +4
-      // เพิ่ม: reverse สีเดียวกัน "ตีกลับ" กองทบไปคนก่อนหน้าได้
-      const stackType = topCard.value === 'draw2' ? 'draw2' : 'wild4';
-      const isBounceReverse = card.value === 'reverse' && card.color === room.currentColor;
-      if (card.value !== stackType && !isBounceReverse) {
-        return socket.emit('error', `ต้องลงไพ่ ${stackType === 'draw2' ? '+2' : '+4'} หรือ reverse สีเดียวกัน เพื่อตอบโต้ หรือจั่วไพ่`);
-      }
-    } else {
-      if (!canPlay(card, topCard, room.currentColor)) return socket.emit('error', 'ลงไพ่นี้ไม่ได้');
+    // รองรับทั้งลงใบเดียว (cardIndex) และหลายใบ (cardIndices)
+    let indices = Array.isArray(cardIndices) ? cardIndices : [cardIndex];
+    // กันค่าซ้ำ/ไม่ถูกต้อง
+    if (new Set(indices).size !== indices.length) return socket.emit('error', 'ไพ่ซ้ำ');
+    const cards = indices.map(i => player.hand[i]);
+    if (cards.some(c => !c)) return socket.emit('error', 'ไพ่ไม่ถูกต้อง');
+
+    const topCard = room.discard[room.discard.length - 1];
+    const leadCard = cards[0];        // ใบแรกคือใบที่ต้องลงได้ถูกกฎ
+    const isMulti = indices.length > 1;
+
+    // ลงหลายใบได้เฉพาะไพ่ตัวเลขที่เลขเดียวกันเท่านั้น
+    if (isMulti) {
+      const isNumber = /^[0-9]$/.test(leadCard.value);
+      if (!isNumber) return socket.emit('error', 'ลงหลายใบได้เฉพาะไพ่ตัวเลข');
+      if (!cards.every(c => c.value === leadCard.value)) return socket.emit('error', 'ต้องเป็นเลขเดียวกัน');
     }
 
-    player.hand.splice(cardIndex, 1);
-    // ถ้าอยู่ใน awaitingDrawPlay และ drawnCardIdx อยู่ท้าย hand การ splice ไม่กระทบ
-    // แต่ต้อง adjust drawnCardIdx ถ้า cardIndex < drawnCardIdx (กรณีที่ยังค้างอยู่)
-    if (room.awaitingDrawPlay && cardIndex < room.drawnCardIdx) room.drawnCardIdx--;
+    // ตรวจกฎตามสถานะ (ใช้ leadCard เป็นตัวตัดสิน)
+    if (room.awaitingDrawPlay) {
+      if (isMulti) return socket.emit('error', 'จั่วแล้วเล่นได้เฉพาะใบที่จั่วมา');
+      if (indices[0] !== room.drawnCardIdx) return socket.emit('error', 'เล่นได้เฉพาะไพ่ที่เพิ่งจั่วมา');
+      room.awaitingDrawPlay = false;
+      room.drawnCardIdx = -1;
+    } else if (room.awaitingFreePlay) {
+      if (!canPlay(leadCard, topCard, room.currentColor)) return socket.emit('error', 'ลงไพ่นี้ไม่ได้');
+      room.awaitingFreePlay = false;
+    } else if (room.drawPending > 0) {
+      if (isMulti) return socket.emit('error', 'ตอนโดน + ลงได้ทีละใบเท่านั้น');
+      const stackType = topCard.value === 'draw2' ? 'draw2' : 'wild4';
+      if (leadCard.value !== stackType) {
+        return socket.emit('error', `ต้องลงไพ่ ${stackType === 'draw2' ? '+2' : '+4'} เพื่อต่อ หรือจั่วไพ่`);
+      }
+    } else {
+      if (!canPlay(leadCard, topCard, room.currentColor)) return socket.emit('error', 'ลงไพ่นี้ไม่ได้');
+    }
 
-    room.discard.push(card);
-    if (card.color === 'wild') room.currentColor = chosenColor || 'red';
-    else room.currentColor = card.color;
+    // เอาไพ่ออกจากมือ (เรียงจาก index มากไปน้อยกัน index เลื่อน)
+    [...indices].sort((a, b) => b - a).forEach(i => player.hand.splice(i, 1));
+
+    // วางลงกองทิ้งตามลำดับที่เลือก ใบสุดท้ายอยู่บนสุด
+    cards.forEach(c => room.discard.push(c));
+    const lastCard = cards[cards.length - 1];
+    if (lastCard.color === 'wild') room.currentColor = chosenColor || 'red';
+    else room.currentColor = lastCard.color;
 
     if (player.hand.length === 0) {
       room.gameOver = true; room.winner = player.name;
       broadcastState(code); return;
     }
-    if (card.value === 'skip') {
+
+    // ไพ่ตัวเลขหลายใบไม่มีเอฟเฟกต์ — เลื่อนตาปกติ
+    const card = leadCard;
+    if (isMulti) {
+      advanceTurn(room);
+    } else if (card.value === 'skip') {
       advanceTurn(room); advanceTurn(room);
     } else if (card.value === 'reverse') {
       room.direction *= -1;
-      if (room.drawPending > 0) {
-        // ตีกลับกองทบ: ย้อนทิศแล้วส่งไปคนก่อนหน้า (เก็บ drawPending ไว้)
-        advanceTurn(room);
-      } else if (room.players.length === 2) {
-        advanceTurn(room); advanceTurn(room);
-      } else {
-        advanceTurn(room);
-      }
+      if (room.players.length === 2) { advanceTurn(room); advanceTurn(room); }
+      else advanceTurn(room);
     } else if (card.value === 'draw2') {
       room.drawPending += 2; advanceTurn(room);
     } else if (card.value === 'wild4') {
@@ -278,15 +296,18 @@ io.on('connection', (socket) => {
     if (!room || !room.started || room.gameOver) return;
     const playerIdx = room.players.findIndex(p => p.id === socket.id);
     if (playerIdx !== room.currentPlayer) return socket.emit('error', 'ยังไม่ถึงตาคุณ');
-    if (room.awaitingDrawPlay) return socket.emit('error', 'กรุณาเลือกเล่นหรือข้ามตาก่อน');
+    if (room.awaitingDrawPlay || room.awaitingFreePlay) return socket.emit('error', 'จั่วไปแล้ว เลือกเล่นหรือกดข้ามตา');
     const player = room.players[playerIdx];
 
     if (room.drawPending > 0) {
-      // จั่วบังคับ — ข้ามตาทันที
+      // จั่วโทษบังคับ +2/+4 แล้วเล่นต่อในตาเดียวกันได้ถ้ามีไพ่ลงได้
       const count = room.drawPending;
       room.drawPending = 0;
       player.hand.push(...drawCards(room, count));
-      advanceTurn(room);
+      const topCard = room.discard[room.discard.length - 1];
+      const canPlayAny = player.hand.some(c => canPlay(c, topCard, room.currentColor));
+      if (canPlayAny) room.awaitingFreePlay = true;
+      else advanceTurn(room);
       broadcastState(code);
     } else {
       // ข้อ 2: จั่ว 1 ใบ ตรวจว่าเล่นได้ไหม
@@ -313,8 +334,9 @@ io.on('connection', (socket) => {
     if (!room || !room.started || room.gameOver) return;
     const playerIdx = room.players.findIndex(p => p.id === socket.id);
     if (playerIdx !== room.currentPlayer) return socket.emit('error', 'ยังไม่ถึงตาคุณ');
-    if (!room.awaitingDrawPlay) return socket.emit('error', 'ไม่มีอะไรให้ข้าม');
+    if (!room.awaitingDrawPlay && !room.awaitingFreePlay) return socket.emit('error', 'ไม่มีอะไรให้ข้าม');
     room.awaitingDrawPlay = false;
+    room.awaitingFreePlay = false;
     room.drawnCardIdx = -1;
     advanceTurn(room);
     broadcastState(code);

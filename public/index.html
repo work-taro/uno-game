@@ -49,6 +49,9 @@
   .card.disabled { opacity: 0.4; cursor: not-allowed; transform: none !important; box-shadow: none !important; }
   .card.playable { box-shadow: 0 0 12px rgba(255,255,255,0.6); }
   .card.just-drawn { box-shadow: 0 0 18px 4px #ffdd44 !important; transform: translateY(-16px) !important; }
+  .card.selected { box-shadow: 0 0 18px 4px #44ddff !important; transform: translateY(-16px) !important; border-color: #44ddff; }
+  .btn-multi { background: #2a4d6e; color: #aaddff; border: 2px solid #44ddff; }
+  .btn-multi:hover { background: #356088; }
   .card-value { font-size: 1.6rem; line-height: 1; }
   .card-symbol { font-size: 0.65rem; position: absolute; top: 4px; left: 6px; }
   .card-symbol-br { font-size: 0.65rem; position: absolute; bottom: 4px; right: 6px; transform: rotate(180deg); }
@@ -144,6 +147,8 @@ let myRoomCode = '';
 let isOwner = false;
 let pendingCardIndex = null;
 let lastState = null;
+let selectMode = false;      // โหมดเลือกไพ่หลายใบ
+let selectedIdx = [];        // index ไพ่ที่เลือกไว้ (ตามลำดับ)
 
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -198,7 +203,7 @@ function startGame() {
 }
 
 function drawCard() {
-  if (lastState && lastState.awaitingDrawPlay) return toast('กรุณาเลือกเล่นหรือกด "ข้ามตา"');
+  if (lastState && (lastState.awaitingDrawPlay || lastState.awaitingFreePlay)) return toast('กรุณาเลือกเล่นหรือกด "ข้ามตา"');
   socket.emit('drawCard', { code: myRoomCode });
 }
 
@@ -258,9 +263,49 @@ function pickColor(color) {
   }
 }
 
+// ตรวจว่าไพ่ใบนี้ลงเป็น "ใบแรก" ได้ไหม (ตามสี/เลข/wild)
+function isLeadPlayable(card, state) {
+  const t = state.topCard;
+  return card.color === 'wild' || card.color === state.currentColor || card.value === t.value;
+}
+
+function toggleSelectMode() {
+  selectMode = !selectMode;
+  selectedIdx = [];
+  if (lastState) renderGame(lastState);
+}
+
+function toggleSelectCard(i) {
+  if (!lastState) return;
+  const card = lastState.hand[i];
+  if (!/^[0-9]$/.test(card.value)) return toast('ลงหลายใบได้เฉพาะไพ่ตัวเลข');
+  if (selectedIdx.includes(i)) {
+    selectedIdx = selectedIdx.filter(x => x !== i);
+  } else if (selectedIdx.length === 0) {
+    if (!isLeadPlayable(card, lastState)) return toast('ใบแรกต้องลงได้ตามสี/เลข');
+    selectedIdx.push(i);
+  } else {
+    const leadVal = lastState.hand[selectedIdx[0]].value;
+    if (card.value !== leadVal) return toast('ต้องเป็นเลขเดียวกัน');
+    selectedIdx.push(i);
+  }
+  renderGame(lastState);
+}
+
+function playSelected() {
+  if (selectedIdx.length === 0) return;
+  socket.emit('playCard', { code: myRoomCode, cardIndices: selectedIdx.slice() });
+  selectMode = false;
+  selectedIdx = [];
+}
+
 function renderGame(state) {
   lastState = state;
   const isMyTurn = state.myIndex === state.currentPlayer;
+  // ออกจากโหมดเลือกถ้าไม่ใช่ตาเรา / โดน + / รอจั่ว
+  if (!isMyTurn || state.drawPending > 0 || state.awaitingDrawPlay || state.gameOver) {
+    selectMode = false; selectedIdx = [];
+  }
   const topCard = state.topCard;
 
   // Top card
@@ -287,7 +332,7 @@ function renderGame(state) {
   `;
   if (state.drawPending > 0) {
     const stackType = topCard.value === 'draw2' ? '+2' : '+4';
-    infoHTML += `<span style="color:#ff4444">⚠️ ต้องจั่ว ${state.drawPending} ใบ / ต่อด้วย ${stackType} / หรือ reverse สีเดียวกันตีกลับ</span>`;
+    infoHTML += `<span style="color:#ff4444">⚠️ ต้องจั่ว ${state.drawPending} ใบ หรือต่อด้วย ${stackType} เท่านั้น</span>`;
   }
   document.getElementById('info-bar').innerHTML = infoHTML;
 
@@ -300,12 +345,35 @@ function renderGame(state) {
   // Action bar — ปุ่มข้ามตา (ข้อ 2)
   const actionBar = document.getElementById('action-bar');
   actionBar.innerHTML = '';
-  if (isMyTurn && state.awaitingDrawPlay) {
+  if (isMyTurn && (state.awaitingDrawPlay || state.awaitingFreePlay)) {
     const btn = document.createElement('button');
     btn.className = 'btn-pass';
-    btn.textContent = '⏭ ข้ามตา (ไม่เล่นไพ่ที่จั่ว)';
+    btn.textContent = state.awaitingFreePlay ? '⏭ ข้ามตา (จั่วโทษแล้วไม่ลง)' : '⏭ ข้ามตา (ไม่เล่นไพ่ที่จั่ว)';
     btn.onclick = passTurn;
     actionBar.appendChild(btn);
+  }
+
+  // ปุ่มลงไพ่เลขเดียวกันหลายใบ (เฉพาะตาเรา + ไม่โดน + + ไม่ใช่รอจั่ว)
+  const canMulti = isMyTurn && !state.gameOver && state.drawPending === 0 && !state.awaitingDrawPlay;
+  if (canMulti && !selectMode) {
+    const btn = document.createElement('button');
+    btn.className = 'btn-multi';
+    btn.textContent = '🃏 เลือกลงหลายใบ (เลขเดียวกัน)';
+    btn.onclick = toggleSelectMode;
+    actionBar.appendChild(btn);
+  } else if (canMulti && selectMode) {
+    const playBtn = document.createElement('button');
+    playBtn.className = 'btn-green';
+    playBtn.textContent = `✅ ลง ${selectedIdx.length} ใบ`;
+    playBtn.disabled = selectedIdx.length === 0;
+    playBtn.style.opacity = selectedIdx.length === 0 ? '0.5' : '1';
+    playBtn.onclick = playSelected;
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn-secondary';
+    cancelBtn.textContent = 'ยกเลิก';
+    cancelBtn.onclick = toggleSelectMode;
+    actionBar.appendChild(playBtn);
+    actionBar.appendChild(cancelBtn);
   }
 
   // Opponents
@@ -329,6 +397,28 @@ function renderGame(state) {
     return;
   }
 
+  // โหมดเลือกหลายใบ — render แยก
+  if (selectMode) {
+    const leadVal = selectedIdx.length ? state.hand[selectedIdx[0]].value : null;
+    state.hand.forEach((card, i) => {
+      const div = document.createElement('div');
+      div.className = 'card ' + card.color;
+      const label = cardLabel(card);
+      div.innerHTML = `<span class="card-symbol">${label}</span><span class="card-value">${cardIcon(card)}</span><span class="card-symbol-br">${label}</span>`;
+      const isNumber = /^[0-9]$/.test(card.value);
+      const isSelected = selectedIdx.includes(i);
+      // เลือกได้ถ้า: เป็นตัวเลข และ (ยังไม่เลือกอะไร→ลงเป็นใบแรกได้ / หรือเลขตรงกับที่เลือกไว้)
+      let selectable = isNumber && (
+        selectedIdx.length === 0 ? isLeadPlayable(card, state) : card.value === leadVal
+      );
+      if (isSelected) { div.classList.add('selected'); div.onclick = () => toggleSelectCard(i); }
+      else if (selectable) { div.classList.add('playable'); div.onclick = () => toggleSelectCard(i); }
+      else div.classList.add('disabled');
+      hand.appendChild(div);
+    });
+    return;
+  }
+
   state.hand.forEach((card, i) => {
     const isJustDrawn = state.awaitingDrawPlay && i === state.drawnCardIdx;
     let playable;
@@ -339,11 +429,13 @@ function renderGame(state) {
     } else if (state.awaitingDrawPlay) {
       // อยู่ใน awaitingDrawPlay — เล่นได้เฉพาะไพ่ที่จั่ว
       playable = false;
+    } else if (state.awaitingFreePlay) {
+      // จั่วโทษไปแล้ว เล่นต่อได้ตามปกติ
+      playable = card.color === 'wild' || card.color === state.currentColor || card.value === topCard.value;
     } else if (state.drawPending > 0) {
-      // ข้อ 3: stack rule ตาม topCard + reverse สีเดียวกันตีกลับได้
+      // stack rule ตาม topCard เท่านั้น (reverse หนีไม่ได้)
       const stackType = topCard.value === 'draw2' ? 'draw2' : 'wild4';
-      playable = card.value === stackType ||
-                 (card.value === 'reverse' && card.color === state.currentColor);
+      playable = card.value === stackType;
     } else {
       playable = card.color === 'wild' || card.color === state.currentColor || card.value === topCard.value;
     }
