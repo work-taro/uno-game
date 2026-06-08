@@ -73,6 +73,13 @@
   .color-btn.blue { background: #4488ff; }
   .color-btn.yellow { background: #ffcc00; }
   .win-banner { font-size: 2rem; color: #ffdd44; text-align: center; text-shadow: 0 0 20px #ffdd44; padding: 2rem; }
+  .lb-table { width: 100%; border-collapse: collapse; }
+  .lb-table th, .lb-table td { padding: 0.6rem 0.8rem; text-align: left; border-bottom: 1px solid #333; }
+  .lb-table th { color: #ffdd44; font-size: 0.85rem; }
+  .lb-table tr:nth-child(1) td { font-weight: bold; }
+  .lb-rank { width: 40px; text-align: center; }
+  .lb-num { text-align: center; }
+  .lb-empty { color: #aaa; text-align: center; padding: 1rem; }
 </style>
 </head>
 <body>
@@ -89,6 +96,15 @@
     <input id="room-code-input" type="text" placeholder="รหัสห้อง 4 ตัว" maxlength="4" style="text-transform:uppercase;letter-spacing:4px;">
     <button class="btn-green" onclick="joinRoom()">เข้าร่วม</button>
   </div>
+  <button class="btn-secondary" style="margin-top:0.5rem" onclick="showLeaderboard()">🏆 ดูตารางอันดับ</button>
+</div>
+
+<!-- Leaderboard -->
+<div id="leaderboard-screen" class="screen">
+  <h1>🏆</h1>
+  <div style="font-size:1.3rem;color:#ffdd44;">ตารางอันดับ</div>
+  <div id="leaderboard-body" style="width:100%;max-width:420px;">กำลังโหลด...</div>
+  <button class="btn-secondary" onclick="goLobby()">← กลับ</button>
 </div>
 
 <!-- Waiting room -->
@@ -202,6 +218,40 @@ function startGame() {
   socket.emit('startGame', { code: myRoomCode });
 }
 
+// ----- Leaderboard: ดึงข้อมูลจาก REST API แล้ววาดตาราง -----
+async function showLeaderboard() {
+  showScreen('leaderboard-screen');
+  const body = document.getElementById('leaderboard-body');
+  body.innerHTML = 'กำลังโหลด...';
+  try {
+    const res = await fetch('/api/leaderboard');   // เรียก API ฝั่ง server
+    const data = await res.json();                 // แปลง response เป็น object
+    if (!data.enabled) {
+      body.innerHTML = `<div class="lb-empty">ยังไม่ได้เชื่อมต่อ Supabase<br>(ตั้งค่า .env ก่อน)</div>`;
+      return;
+    }
+    if (!data.list || data.list.length === 0) {
+      body.innerHTML = `<div class="lb-empty">ยังไม่มีข้อมูล — เล่นให้จบสักเกมก่อน</div>`;
+      return;
+    }
+    const rows = data.list.map((p, i) => `
+      <tr>
+        <td class="lb-rank">${medal(i + 1)}</td>
+        <td>${p.name}</td>
+        <td class="lb-num">${p.wins}</td>
+        <td class="lb-num">${p.games}</td>
+      </tr>
+    `).join('');
+    body.innerHTML = `
+      <table class="lb-table">
+        <thead><tr><th class="lb-rank">#</th><th>ชื่อ</th><th class="lb-num">ชนะ</th><th class="lb-num">เล่น</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  } catch (e) {
+    body.innerHTML = `<div class="lb-empty">โหลดไม่สำเร็จ: ${e.message}</div>`;
+  }
+}
+
 function drawCard() {
   if (lastState && (lastState.awaitingDrawPlay || lastState.awaitingFreePlay)) return toast('กรุณาเลือกเล่นหรือกด "ข้ามตา"');
   socket.emit('drawCard', { code: myRoomCode });
@@ -261,6 +311,10 @@ function pickColor(color) {
     socket.emit('playCard', { code: myRoomCode, cardIndex: pendingCardIndex, chosenColor: color });
     pendingCardIndex = null;
   }
+}
+
+function medal(rank) {
+  return rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `#${rank}`;
 }
 
 // ตรวจว่าไพ่ใบนี้ลงเป็น "ใบแรก" ได้ไหม (ตามสี/เลข/wild)
@@ -383,7 +437,12 @@ function renderGame(state) {
     if (i === state.myIndex) return;
     const div = document.createElement('div');
     div.className = 'opponent' + (i === state.currentPlayer ? ' active' : '');
-    div.textContent = `${p.name} (${p.cardCount} ใบ)${i === state.currentPlayer ? ' 🎯' : ''}`;
+    if (p.finished) {
+      div.style.opacity = '0.6';
+      div.textContent = `${p.name} ${medal(p.rank)} จบแล้ว`;
+    } else {
+      div.textContent = `${p.name} (${p.cardCount} ใบ)${i === state.currentPlayer ? ' 🎯' : ''}`;
+    }
     opp.appendChild(div);
   });
 
@@ -392,8 +451,18 @@ function renderGame(state) {
   hand.innerHTML = '';
 
   if (state.gameOver) {
-    const iWon = state.winner === myName;
-    hand.innerHTML = `<div class="win-banner">${iWon ? '🎉 คุณชนะ! 🎉' : `🏆 ${state.winner} ชนะ!`}</div>`;
+    const rows = (state.rankings || []).map(r => {
+      const mine = r.name === myName ? ' style="color:#ffdd44;font-weight:bold"' : '';
+      return `<div${mine}>${medal(r.rank)} อันดับ ${r.rank} — ${r.name}${r.name === myName ? ' (คุณ)' : ''}</div>`;
+    }).join('');
+    hand.innerHTML = `<div class="win-banner" style="line-height:1.8;font-size:1.4rem">🏁 จบเกม!<br>${rows}</div>`;
+    return;
+  }
+
+  // เราจบแล้วแต่เกมยังไม่จบ — รอเพื่อนเล่นต่อ
+  const me = state.players[state.myIndex];
+  if (me && me.finished) {
+    hand.innerHTML = `<div class="win-banner">${medal(me.rank)} คุณจบแล้ว! อันดับ ${me.rank}<br><span style="font-size:1rem;color:#aaa">รอเพื่อนเล่นต่อ...</span></div>`;
     return;
   }
 

@@ -1,8 +1,10 @@
+require('dotenv').config();              // โหลดค่าจากไฟล์ .env เข้า process.env (ตอนรัน local)
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
 const os = require('os');
+const db = require('./db');              // ชั้นฐานข้อมูล (Supabase)
 
 const app = express();
 const server = http.createServer(app);
@@ -10,7 +12,23 @@ const io = new Server(server);
 
 app.use(express.static(path.join(__dirname, 'public')));
 
+// ----- REST API: ให้ frontend ดึงตารางอันดับ -----
+//   frontend เรียก fetch('/api/leaderboard') → ได้ JSON กลับไปวาดตาราง
+app.get('/api/leaderboard', async (req, res) => {
+  const list = await db.topPlayers(20);
+  res.json({ enabled: db.enabled, list });
+});
+
 const rooms = {};
+
+// บันทึกผลลงฐานข้อมูลเมื่อเกมจบ (เรียกครั้งเดียวต่อเกม)
+function recordGameResult(room) {
+  if (room.recorded) return;
+  room.recorded = true;
+  room.players
+    .filter(p => p.rank > 0)
+    .forEach(p => db.recordPlayer(p.name, p.rank === 1));
+}
 
 function getLocalIP() {
   const interfaces = os.networkInterfaces();
@@ -83,11 +101,22 @@ function drawCards(room, count) {
 }
 
 function nextPlayerIndex(room) {
-  return (room.currentPlayer + room.direction + room.players.length) % room.players.length;
+  const n = room.players.length;
+  let idx = room.currentPlayer;
+  // เลื่อนไปคนถัดไปที่ยังไม่จบ (ข้ามคนที่ไพ่หมดแล้ว)
+  for (let step = 0; step < n; step++) {
+    idx = (idx + room.direction + n) % n;
+    if (!room.players[idx].finished) return idx;
+  }
+  return room.currentPlayer;
 }
 
 function advanceTurn(room) {
   room.currentPlayer = nextPlayerIndex(room);
+}
+
+function activeCount(room) {
+  return room.players.filter(p => !p.finished).length;
 }
 
 function broadcastState(roomCode) {
@@ -103,7 +132,12 @@ function broadcastState(roomCode) {
         cardCount: p.hand.length,
         isCurrentPlayer: i === room.currentPlayer,
         isOwner: i === 0,
+        finished: p.finished,
+        rank: p.rank,
       })),
+      rankings: room.gameOver
+        ? room.players.filter(p => p.rank > 0).sort((a, b) => a.rank - b.rank).map(p => ({ name: p.name, rank: p.rank }))
+        : null,
       topCard: room.discard[room.discard.length - 1],
       currentColor: room.currentColor,
       currentPlayer: room.currentPlayer,
@@ -150,6 +184,19 @@ function removePlayerFromRoom(socketId) {
       room.awaitingFreePlay = false;
       room.drawnCardIdx = -1;
     }
+    // ถ้าคนที่ออกคือคนปัจจุบัน (หรือ slot ชี้ไปคนที่จบแล้ว) เลื่อนไปคน active ถัดไป
+    if (!room.gameOver && room.players[room.currentPlayer] && room.players[room.currentPlayer].finished) {
+      advanceTurn(room);
+    }
+    // เหลือ active <= 1 → จบเกม จัดอันดับคนสุดท้าย
+    if (!room.gameOver && activeCount(room) <= 1) {
+      const last = room.players.find(p => !p.finished);
+      if (last) { last.finished = true; last.rank = room.players.filter(p => p.finished).length; }
+      room.gameOver = true;
+      const champ = room.players.find(p => p.rank === 1);
+      room.winner = champ ? champ.name : null;
+      recordGameResult(room);
+    }
     io.to(code).emit('playerLeft', name);
     broadcastState(code);
     return;
@@ -195,7 +242,7 @@ io.on('connection', (socket) => {
     if (room.players[0].id !== socket.id) return socket.emit('error', 'เฉพาะเจ้าของห้องเท่านั้น');
     if (room.players.length < 2) return socket.emit('error', 'ต้องมีผู้เล่นอย่างน้อย 2 คน');
     room.deck = createDeck();
-    room.players.forEach(p => { p.hand = drawCards(room, 7); });
+    room.players.forEach(p => { p.hand = drawCards(room, 7); p.finished = false; p.rank = 0; });
     let startCard;
     do { startCard = room.deck.pop(); } while (startCard.color === 'wild');
     room.discard = [startCard];
@@ -266,12 +313,13 @@ io.on('connection', (socket) => {
     if (lastCard.color === 'wild') room.currentColor = chosenColor || 'red';
     else room.currentColor = lastCard.color;
 
+    // ไพ่หมดมือ → จบเกมสำหรับคนนี้ ได้อันดับตามลำดับที่หมด (ยังเล่นต่อ)
     if (player.hand.length === 0) {
-      room.gameOver = true; room.winner = player.name;
-      broadcastState(code); return;
+      player.finished = true;
+      player.rank = room.players.filter(p => p.finished).length;
     }
 
-    // ไพ่ตัวเลขหลายใบไม่มีเอฟเฟกต์ — เลื่อนตาปกติ
+    // ใช้เอฟเฟกต์ของไพ่ (advanceTurn จะข้ามคนที่จบแล้วอัตโนมัติ)
     const card = leadCard;
     if (isMulti) {
       advanceTurn(room);
@@ -279,7 +327,8 @@ io.on('connection', (socket) => {
       advanceTurn(room); advanceTurn(room);
     } else if (card.value === 'reverse') {
       room.direction *= -1;
-      if (room.players.length === 2) { advanceTurn(room); advanceTurn(room); }
+      // เหลือ 2 คนที่ยังเล่น → reverse ทำงานเหมือน skip
+      if (activeCount(room) === 2) { advanceTurn(room); advanceTurn(room); }
       else advanceTurn(room);
     } else if (card.value === 'draw2') {
       room.drawPending += 2; advanceTurn(room);
@@ -287,6 +336,16 @@ io.on('connection', (socket) => {
       room.drawPending += 4; advanceTurn(room);
     } else {
       advanceTurn(room);
+    }
+
+    // เหลือคนเล่น 1 คน → จบเกม คนสุดท้ายได้อันดับสุดท้าย
+    if (activeCount(room) <= 1) {
+      const last = room.players.find(p => !p.finished);
+      if (last) { last.finished = true; last.rank = room.players.filter(p => p.finished).length; }
+      room.gameOver = true;
+      const champ = room.players.find(p => p.rank === 1);
+      room.winner = champ ? champ.name : null;
+      recordGameResult(room);
     }
     broadcastState(code);
   });
