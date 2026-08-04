@@ -15,10 +15,26 @@ pipeline {
 
     post {
         success {
-            sh 'curl -H "Content-Type: application/json" -d \'{"content":"✅ UNO build สำเร็จ! (#\'$BUILD_NUMBER\')"}\' $DISCORD_WEBHOOK_URL'
+            sh '''
+                curl -H "Content-Type: application/json" -X POST -d '{
+                  "embeds": [{
+                    "title": "services",
+                    "description": "Jenkins Pipeline Build #'$BUILD_NUMBER' | SUCCESS",
+                    "color": 3066993
+                  }]
+                }' $DISCORD_WEBHOOK_URL
+            '''
         }
         failure {
-            sh 'curl -H "Content-Type: application/json" -d \'{"content":"❌ UNO build ล้มเหลว! (#\'$BUILD_NUMBER\')"}\' $DISCORD_WEBHOOK_URL'
+            sh '''
+                curl -H "Content-Type: application/json" -X POST -d '{
+                  "embeds": [{
+                    "title": "services",
+                    "description": "Jenkins Pipeline Build #'$BUILD_NUMBER' | FAILURE",
+                    "color": 15158332
+                  }]
+                }' $DISCORD_WEBHOOK_URL
+            '''
         }
     }
 }
