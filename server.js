@@ -414,3 +414,14 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`Network: http://${ip}:${PORT}`);
   console.log('บอก IP นี้ให้เพื่อนเปิดในเบราว์เซอร์ (ต้องอยู่ Wi-Fi เดียวกัน)');
 });
+
+const { notifyDiscord } = require("./notify");
+
+// ตัวอย่าง: แจ้งเตือนตอน server เริ่มทำงาน
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+  notifyDiscord(`🎮 UNO server เริ่มทำงานแล้วที่ port ${PORT}`);
+});
+
+// ตัวอย่าง: แจ้งเตือนตอนมีคนเข้าเกม / จบเกม
+notifyDiscord("มีผู้เล่นเข้าห้องใหม่");
