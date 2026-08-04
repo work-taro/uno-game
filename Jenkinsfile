@@ -1,10 +1,6 @@
 pipeline {
     agent any
 
-    tools {
-        nodejs 'node'
-    }
-
     environment {
         DISCORD_WEBHOOK_URL = credentials('discord-webhook')
     }
