@@ -1,25 +1,28 @@
 pipeline {
     agent any
 
+    tools {
+        nodejs 'node'
+    }
+
+    environment {
+        DISCORD_WEBHOOK_URL = credentials('discord-webhook')
+    }
+
     stages {
-        stage('Checkout') {
-            steps {
-                echo 'ดึงโค้ดจาก GitHub สำเร็จ'
-            }
-        }
         stage('Install') {
             steps {
-                echo 'ขั้นตอน install (เดี๋ยวค่อยเพิ่มของจริง)'
+                sh 'npm install'
             }
         }
     }
 
     post {
         success {
-            echo '✅ Pipeline สำเร็จ!'
+            sh 'curl -H "Content-Type: application/json" -d \'{"content":"✅ UNO build สำเร็จ! (#\'$BUILD_NUMBER\')"}\' $DISCORD_WEBHOOK_URL'
         }
         failure {
-            echo '❌ Pipeline ล้มเหลว!'
+            sh 'curl -H "Content-Type: application/json" -d \'{"content":"❌ UNO build ล้มเหลว! (#\'$BUILD_NUMBER\')"}\' $DISCORD_WEBHOOK_URL'
         }
     }
 }
