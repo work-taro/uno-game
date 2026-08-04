@@ -17,6 +17,8 @@ pipeline {
         success {
             sh '''
                 curl -H "Content-Type: application/json" -X POST -d '{
+                "username": "Jenkins",
+                "avatar_url": "https://www.jenkins.io/images/logos/jenkins/jenkins.png",
                   "embeds": [{
                     "title": "uno-pipeline",
                     "description": "Jenkins Pipeline Build #'$BUILD_NUMBER' | SUCCESS",
@@ -28,6 +30,8 @@ pipeline {
         failure {
             sh '''
                 curl -H "Content-Type: application/json" -X POST -d '{
+                "username": "Jenkins",
+                "avatar_url": "https://www.jenkins.io/images/logos/jenkins/jenkins.png",
                   "embeds": [{
                     "title": "uno-pipeline",
                     "description": "Jenkins Pipeline Build #'$BUILD_NUMBER' | FAILURE",
