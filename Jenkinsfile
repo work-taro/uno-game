@@ -18,7 +18,7 @@ pipeline {
             sh '''
                 curl -H "Content-Type: application/json" -X POST -d '{
                   "embeds": [{
-                    "title": "services",
+                    "title": "uno-pipeline",
                     "description": "Jenkins Pipeline Build #'$BUILD_NUMBER' | SUCCESS",
                     "color": 3066993
                   }]
@@ -29,7 +29,7 @@ pipeline {
             sh '''
                 curl -H "Content-Type: application/json" -X POST -d '{
                   "embeds": [{
-                    "title": "services",
+                    "title": "uno-pipeline",
                     "description": "Jenkins Pipeline Build #'$BUILD_NUMBER' | FAILURE",
                     "color": 15158332
                   }]
